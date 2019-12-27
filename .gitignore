@@ -1,3 +1,4 @@
 http
 tcp
+*.out
 *.pprof
