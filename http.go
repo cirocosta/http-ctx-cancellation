@@ -3,11 +3,14 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
+	"io/ioutil"
 	"net/http"
 	"os"
+	"os/signal"
 	"runtime"
 	"runtime/pprof"
-	"time"
+	"syscall"
 )
 
 var isServer = flag.Bool("server", false, "whether it should act as a server")
@@ -22,7 +25,8 @@ func mustNot(err error) {
 
 func server() {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(3 * time.Second)
+		// time.Sleep(1 * time.Second)
+		fmt.Fprintln(w, "yoo")
 	})
 
 	http.ListenAndServe(":1337", nil)
@@ -30,15 +34,29 @@ func server() {
 
 func client() {
 	var (
-		ctx, _ = context.WithTimeout(context.Background(), 1*time.Second)
-		client = http.DefaultClient
+		ctx, cancel = context.WithCancel(context.Background())
+		client      = http.DefaultClient
 	)
+
+	go func() {
+		sigs := make(chan os.Signal, 1)
+		signal.Notify(sigs, syscall.SIGUSR1)
+
+		<-sigs
+		cancel()
+	}()
 
 	req, err := http.NewRequestWithContext(ctx, "GET", "http://localhost:1337", nil)
 	mustNot(err)
 
-	_, err = client.Do(req)
+	resp, err := client.Do(req)
 	mustNot(err)
+
+	b, err := ioutil.ReadAll(resp.Body)
+	mustNot(err)
+
+	fmt.Printf("STATUS: %d %s\n", resp.StatusCode, resp.Status)
+	fmt.Printf("BODY: %s\n", string(b))
 }
 
 func writeProfile() {
