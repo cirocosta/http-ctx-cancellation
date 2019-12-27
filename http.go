@@ -11,9 +11,16 @@ import (
 	"runtime"
 	"runtime/pprof"
 	"syscall"
+	"time"
 )
 
-var isServer = flag.Bool("server", false, "whether it should act as a server")
+var (
+	isServer   = flag.Bool("server", false, "whether it should act as a server")
+	memprofile = flag.Bool("memprofile", false, "write a heap prof to heap.pprof")
+
+	timeout = flag.Duration("timeout", 2*time.Second, "request timeout (client)")
+	sleep   = flag.Duration("sleeo", 5*time.Second, "time to sleep during each request (server)")
+)
 
 func mustNot(err error) {
 	if err == nil {
@@ -25,7 +32,7 @@ func mustNot(err error) {
 
 func server() {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// time.Sleep(1 * time.Second)
+		time.Sleep(*sleep)
 		fmt.Fprintln(w, "yoo")
 	})
 
@@ -34,7 +41,7 @@ func server() {
 
 func client() {
 	var (
-		ctx, cancel = context.WithCancel(context.Background())
+		ctx, cancel = context.WithTimeout(context.Background(), *timeout)
 		client      = http.DefaultClient
 	)
 
@@ -75,9 +82,11 @@ func init() {
 }
 
 func main() {
-	// defer writeProfile()
-
 	flag.Parse()
+
+	if *memprofile {
+		defer writeProfile()
+	}
 
 	if *isServer {
 		server()

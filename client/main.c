@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/epoll.h>
+#include <sys/timerfd.h>
 #include <unistd.h>
 
 #define BUFSIZE 4096
@@ -19,7 +20,6 @@ enum state {
 	CONNECTING,
 	CONNECTED,
 	WROTE,
-	DONE,
 };
 
 typedef struct fd {
@@ -89,8 +89,6 @@ sock_errcheck(int sock_fd)
 	int       result;
 	socklen_t result_len = sizeof(result);
 
-	// get and clear any pending socket error
-	//
 	if (!~getsockopt(sock_fd, SOL_SOCKET, SO_ERROR, &result, &result_len)) {
 		perror("getsockopt");
 		return -1;
@@ -105,35 +103,86 @@ sock_errcheck(int sock_fd)
 }
 
 int
-run(fd_t* fd)
+add_to_epoll(int epoll_fd, int fd, int flags)
 {
 	struct epoll_event event;
+	event.data.fd = fd;
+	event.events  = flags;
+
+	if (!~epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &event)) {
+		if (errno != EEXIST) {
+			perror("run: epoll_ctl ADD");
+			return -1;
+		}
+
+		if (!~epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, 0)) {
+			perror("run: epoll_ctl DEL_AFTER_ADD");
+			return -1;
+		}
+
+		if (!~epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &event)) {
+			perror("run: epoll_ctl ADD_AFTER_RETRY");
+			return -1;
+		}
+	}
+
+	return 0;
+}
+
+int
+add_timer_to_epoll(int epoll_fd)
+{
+	int timer_fd;
+	struct itimerspec duration = {
+		.it_value = {
+			.tv_sec = 2, // 2 seconds since now
+		},
+	};
+
+	if (!~(timer_fd = timerfd_create(CLOCK_REALTIME, 0))) {
+		perror("run: timerfd_create");
+		return -1;
+	}
+
+	if (!~timerfd_settime(timer_fd, 0, &duration, NULL)) {
+		perror("run: timerfd_settime");
+		return -1;
+	}
+
+	if (!~add_to_epoll(epoll_fd, timer_fd, EPOLLIN)) {
+		return -1;
+	}
+
+	return timer_fd;
+}
+
+int
+run(fd_t* fd)
+{
 	struct epoll_event events[MAXEVENTS] = { 0 };
-	int                epoll_fd;
+	int                epoll_fd, timer_fd;
 
 	if (!~(epoll_fd = epoll_create1(0))) {
 		perror("run: epoll_create1");
 		return 1;
 	}
 
-	event.data.fd = fd->fd;
-	event.events  = EPOLLIN | EPOLLOUT;
+	if (!~add_to_epoll(epoll_fd, fd->fd, EPOLLOUT)) {
+		return -1;
+	}
 
-	if (!~epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd->fd, &event)) {
-		perror("run: epoll_ctl");
+	if (!~(timer_fd = add_timer_to_epoll(epoll_fd))) {
 		return -1;
 	}
 
 	while (1) {
 		int n = 0;
-		int i = 0;
-
 		if (!~(n = epoll_wait(epoll_fd, events, MAXEVENTS, -1))) {
 			perror("epoll_wait");
 			return -1;
 		}
 
-		for (; i < n; i++) {
+		for (int i = 0; i < n; i++) {
 			int ev    = events[i].events;
 			int ev_fd = events[i].data.fd;
 
@@ -149,6 +198,12 @@ run(fd_t* fd)
 				}
 
 				return 0;
+			}
+
+			if (ev_fd == timer_fd) {
+				close(timer_fd);
+				close(fd->fd);
+				continue;
 			}
 
 			if (ev_fd != fd->fd) {
@@ -169,6 +224,11 @@ run(fd_t* fd)
 						return -1;
 					}
 
+					if (!~add_to_epoll(
+					      epoll_fd, fd->fd, EPOLLIN)) {
+						return -1;
+					}
+
 					fd->state = WROTE;
 					break;
 
@@ -182,10 +242,6 @@ run(fd_t* fd)
 						return -1;
 					}
 
-					fd->state = DONE;
-					break;
-
-				case DONE:
 					return 0;
 
 				default:
