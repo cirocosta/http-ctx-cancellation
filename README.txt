@@ -22,6 +22,8 @@ WHAT'S THIS
 	(plain `close(2)`) on a nonblocking socket that's part of an epoll
 	facility
 
+
+
 		strace -f -e 'trace=!futex,nanosleep' ./http
 
 
@@ -64,6 +66,7 @@ WHAT'S THIS
 
 			[pid 17755] epoll_ctl(4, EPOLL_CTL_DEL, 3, 0xc000132984) = 0
 			[pid 17755] close(3)                    = 0
+
 
 
 	naturally, we can implement that in C - see ./http-client.c
