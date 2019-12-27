@@ -10,6 +10,9 @@
 #define BUFSIZE 4096
 #define MAXEVENTS 32
 
+#define HOST "127.0.0.1"
+#define PORT 1337
+
 enum state {
 	UNKNOWN,
 
@@ -38,8 +41,8 @@ fd_init(fd_t* fd)
 	}
 
 	server_addr.sin_family = AF_INET;
-	server_addr.sin_port   = htons(1337);
-	inet_pton(AF_INET, "127.0.0.1", &server_addr.sin_addr);
+	server_addr.sin_port   = htons(PORT);
+	inet_pton(AF_INET, HOST, &server_addr.sin_addr);
 
 	if (!~connect(
 	      fd->fd, (struct sockaddr*)&server_addr, sizeof(server_addr))) {
@@ -139,8 +142,7 @@ run(fd_t* fd)
 				return -1;
 			}
 
- 			if (ev & EPOLLHUP) {
-				// close the conn
+			if (ev & EPOLLHUP) {
 				if (!~close(fd->fd)) {
 					perror("run: close");
 					return -1;
@@ -209,19 +211,6 @@ main(int argc, char** argv)
 	if (!~run(&fd)) {
 		return 1;
 	}
-
-	// ...
-
-	/* if (!~communicate(sock_fd)) { */
-	/* 	return 1; */
-	/* } */
-
-	/* if (!~close(sock_fd)) { */
-	/* 	perror("close"); */
-	/* 	return 1; */
-	/* } */
-
-	/* free(events); */
 
 	return 0;
 }
